@@ -1,8 +1,15 @@
+using DotNetExamApi.Application.Behaviors;
 using DotNetExamApi.Domain.Entities;
 using DotNetExamApi.Domain.Services;
 using DotNetExamApi.Infrastructure;
+using DotNetExamApi.Infrastructure.Security;
+using DotNetExamApi.MinimalApi;
 using DotNetExamApi.Shared;
+using MediatR;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,8 +26,25 @@ builder.Services.AddSwaggerGen(c =>
     c.SwaggerDoc("v1", new() { Title = "DotNetExamApi", Version = "v1" });
 });
 
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(
+                Encoding.UTF8.GetBytes("mysupersecretkey123")),
+            ValidateAudience = false,
+            ValidateIssuer = false
+        };
+    });
+builder.Services.AddAuthorization();
+
 builder.Services.AddMediatR(cfg =>
-    cfg.RegisterServicesFromAssembly(typeof(Program).Assembly));
+{
+    cfg.RegisterServicesFromAssembly(typeof(Program).Assembly);
+    cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
+});
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseInMemoryDatabase("DotNetExamDb"));
@@ -35,6 +59,11 @@ builder.Services.AddSingleton<FileLoggerService>(sp =>
     return new FileLoggerService(path);
 });
 builder.Services.AddSingleton<ServiceBusPublisher>();
+builder.Services.AddScoped<JwtService>();
+builder.Services.AddScoped<KeyVaultService>();
+builder.Services.AddSingleton<BlobStorageService>();
+builder.Services.AddScoped<EmailNotificationService>();
+builder.Services.AddScoped<SmsNotificationService>();
 
 var app = builder.Build();
 
@@ -45,8 +74,10 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+app.MapProductEndpoints();
 
 _ = SeedDatabaseAsync(app);
 
